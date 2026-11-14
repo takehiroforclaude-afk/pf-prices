@@ -9,6 +9,7 @@ T = {
     "NVDA": "NVDA", "MSFT": "MSFT", "GOOGL": "GOOGL", "AMZN": "AMZN", "TSM": "TSMC_ADR", "PLTR": "PLTR", "SOFI": "SOFI", "MSTR": "MSTR",
     "LLY": "LLY", "MDLZ": "MDLZ", "PEP": "PEP", "KDP": "KDP", "BTI": "BTI", "XEL": "XEL", "EXC": "EXC", "TMUS": "TMUS", "PAYX": "PAYX", "LMT": "LMT",
     "VIST": "VIST", "GLDM": "GLDM", "ACWI": "ACWI_ETF", "QQQ": "QQQ", "SOXX": "SOXX",
+    "CME": "CME", "AJG": "AJG", "ROP": "ROP",
     "2914.T": "JT", "9432.T": "NTT", "2503.T": "KirinHD", "7203.T": "Toyota", "8306.T": "MUFG", "8316.T": "SMFG", "8411.T": "Mizuho",
     "3350.T": "Metaplanet", "8035.T": "TokyoElectron", "6857.T": "Advantest", "1489.T": "NF_Nikkei_HighDiv50", "1367.T": "TOPIX_Lev2x",
 }
