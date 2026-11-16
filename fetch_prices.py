@@ -1,4 +1,5 @@
 # 市場の終値を Yahoo Finance から取り、data/prices.csv（日付×銘柄の終値）と data/latest.csv（直近の終値と前日比）を書く
+# v3.1（2026-11-16）：FRED の取り方を3通りに増やし、結果を data/credit_status.txt に書く（失敗の理由を外から見るため）
 # v3（2026-11-16）：信用の指標を追加。FRED の社債の上乗せ金利（ハイイールド・投資適格）を data/credit.csv に書き、latest.csv に足す。代わりの目安として HYG・LQD の価格も取る
 # v2（2026-11-16）：米国5年金利（^FVX）を追加。財務省の国債金利（日次）を data/jgb.csv に書き、日本の2年・5年・10年の直近の値を latest.csv に足す
 import sys, time, re, io, urllib.request, datetime as dt
@@ -118,28 +119,58 @@ try:
 except Exception as e:
     print("JGB fetch failed (prices are kept):", repr(e))
 
-# ---- FRED の社債の上乗せ金利（日次、%）。失敗しても他のファイルは残す ----
+# ---- FRED の社債の上乗せ金利（日次、%）。失敗しても他のファイルは残す。試した結果は data/credit_status.txt に書く ----
 FRED = {"BAMLH0A0HYM2": "US_HY_OAS", "BAMLC0A0CM": "US_IG_OAS"}
+UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36", "Accept": "text/csv,text/plain,*/*"}
+log = []
+
+def get(u):
+    return urllib.request.urlopen(urllib.request.Request(u, headers=UA), timeout=120).read()
+
+def fred_one(sid):
+    tries = [("graph_csv", "https://fred.stlouisfed.org/graph/fredgraph.csv?id=" + sid),
+             ("graph_csv_cosd", "https://fred.stlouisfed.org/graph/fredgraph.csv?id=" + sid + "&cosd=2000-01-01"),
+             ("data_txt", "https://fred.stlouisfed.org/data/" + sid + ".txt")]
+    for tag, u in tries:
+        try:
+            raw = get(u)
+            if tag == "data_txt":
+                t = raw.decode("utf-8", errors="replace").splitlines()
+                k = next(n for n, l in enumerate(t) if l.strip().upper().startswith("DATE"))
+                f = pd.read_csv(io.StringIO("\n".join(t[k + 1:])), sep=r"\s+", header=None, names=["date", sid], na_values=["."])
+            else:
+                if raw[:200].lstrip().startswith(b"<"):
+                    raise ValueError("HTML returned: " + raw[:120].decode("utf-8", "replace"))
+                f = pd.read_csv(io.BytesIO(raw), na_values=["."])
+                f.columns = ["date", sid]
+            x = pd.to_numeric(f.set_index("date")[sid], errors="coerce")
+            if x.dropna().empty:
+                raise ValueError("no numeric rows")
+            log.append(f"{sid} {tag} ok rows={len(x)} last={x.dropna().index[-1]}")
+            return x
+        except Exception as e:
+            log.append(f"{sid} {tag} failed: {repr(e)[:200]}")
+            time.sleep(3)
+    return None
+
 try:
-    parts = []
-    for sid in FRED:
-        req = urllib.request.Request("https://fred.stlouisfed.org/graph/fredgraph.csv?id=" + sid, headers={"User-Agent": "Mozilla/5.0 (pf-prices relay)"})
-        f = pd.read_csv(io.BytesIO(urllib.request.urlopen(req, timeout=60).read()), na_values=["."])
-        f.columns = ["date", sid]
-        parts.append(f.set_index("date")[sid])
-        time.sleep(2)
-    K = pd.concat(parts, axis=1).sort_index()
-    K = K[K.index >= "2000-01-01"]
-    K.round(4).to_csv("data/credit.csv")
-    print("credit rows", len(K), "last", K.index[-1])
-    for sid, name in FRED.items():
-        x = K[sid].dropna()
-        if len(x) >= 2:
-            c, p = float(x.iloc[-1]), float(x.iloc[-2])
-            rows.append({"symbol": sid, "name": name, "date": x.index[-1], "close": round(c, 4), "prev_date": x.index[-2], "prev_close": round(p, 4),
-                         "change_pct": "", "change_bp": round((c - p) * 100, 1), "fetched_at_utc": now})
+    parts = [x for x in (fred_one(sid) for sid in FRED) if x is not None]
+    if parts:
+        K = pd.concat(parts, axis=1).sort_index()
+        K = K[K.index >= "2000-01-01"]
+        K.round(4).to_csv("data/credit.csv")
+        for sid, name in FRED.items():
+            if sid not in K.columns:
+                continue
+            x = K[sid].dropna()
+            if len(x) >= 2:
+                c, p = float(x.iloc[-1]), float(x.iloc[-2])
+                rows.append({"symbol": sid, "name": name, "date": x.index[-1], "close": round(c, 4), "prev_date": x.index[-2], "prev_close": round(p, 4),
+                             "change_pct": "", "change_bp": round((c - p) * 100, 1), "fetched_at_utc": now})
 except Exception as e:
-    print("FRED fetch failed (prices are kept):", repr(e))
+    log.append("FRED block failed: " + repr(e)[:200])
+open("data/credit_status.txt", "w", encoding="utf-8").write(now + " UTC\n" + "\n".join(log) + "\n")
+print("\n".join(log))
 
 pd.DataFrame(rows).to_csv("data/latest.csv", index=False)
 print("wrote", len(rows), "rows at", now)
