@@ -1,4 +1,5 @@
 # 市場の終値を Yahoo Finance から取り、data/prices.csv（日付×銘柄の終値）と data/latest.csv（直近の終値と前日比）を書く
+# v3（2026-11-16）：信用の指標を追加。FRED の社債の上乗せ金利（ハイイールド・投資適格）を data/credit.csv に書き、latest.csv に足す。代わりの目安として HYG・LQD の価格も取る
 # v2（2026-11-16）：米国5年金利（^FVX）を追加。財務省の国債金利（日次）を data/jgb.csv に書き、日本の2年・5年・10年の直近の値を latest.csv に足す
 import sys, time, re, io, urllib.request, datetime as dt
 import pandas as pd
@@ -10,7 +11,7 @@ T = {
     "NVDA": "NVDA", "MSFT": "MSFT", "GOOGL": "GOOGL", "AMZN": "AMZN", "TSM": "TSMC_ADR", "PLTR": "PLTR", "SOFI": "SOFI", "MSTR": "MSTR",
     "LLY": "LLY", "MDLZ": "MDLZ", "PEP": "PEP", "KDP": "KDP", "BTI": "BTI", "XEL": "XEL", "EXC": "EXC", "TMUS": "TMUS", "PAYX": "PAYX", "LMT": "LMT",
     "VIST": "VIST", "GLDM": "GLDM", "ACWI": "ACWI_ETF", "QQQ": "QQQ", "SOXX": "SOXX",
-    "CME": "CME", "AJG": "AJG", "ROP": "ROP",
+    "CME": "CME", "AJG": "AJG", "ROP": "ROP", "HYG": "HYG_HighYield_ETF", "LQD": "LQD_IG_ETF",
     "2914.T": "JT", "9432.T": "NTT", "2503.T": "KirinHD", "7203.T": "Toyota", "8306.T": "MUFG", "8316.T": "SMFG", "8411.T": "Mizuho",
     "3350.T": "Metaplanet", "8035.T": "TokyoElectron", "6857.T": "Advantest", "1489.T": "NF_Nikkei_HighDiv50", "1367.T": "TOPIX_Lev2x",
 }
@@ -116,6 +117,29 @@ try:
                              "change_pct": "", "change_bp": round((c - p) * 100, 1), "fetched_at_utc": now})
 except Exception as e:
     print("JGB fetch failed (prices are kept):", repr(e))
+
+# ---- FRED の社債の上乗せ金利（日次、%）。失敗しても他のファイルは残す ----
+FRED = {"BAMLH0A0HYM2": "US_HY_OAS", "BAMLC0A0CM": "US_IG_OAS"}
+try:
+    parts = []
+    for sid in FRED:
+        req = urllib.request.Request("https://fred.stlouisfed.org/graph/fredgraph.csv?id=" + sid, headers={"User-Agent": "Mozilla/5.0 (pf-prices relay)"})
+        f = pd.read_csv(io.BytesIO(urllib.request.urlopen(req, timeout=60).read()), na_values=["."])
+        f.columns = ["date", sid]
+        parts.append(f.set_index("date")[sid])
+        time.sleep(2)
+    K = pd.concat(parts, axis=1).sort_index()
+    K = K[K.index >= "2000-01-01"]
+    K.round(4).to_csv("data/credit.csv")
+    print("credit rows", len(K), "last", K.index[-1])
+    for sid, name in FRED.items():
+        x = K[sid].dropna()
+        if len(x) >= 2:
+            c, p = float(x.iloc[-1]), float(x.iloc[-2])
+            rows.append({"symbol": sid, "name": name, "date": x.index[-1], "close": round(c, 4), "prev_date": x.index[-2], "prev_close": round(p, 4),
+                         "change_pct": "", "change_bp": round((c - p) * 100, 1), "fetched_at_utc": now})
+except Exception as e:
+    print("FRED fetch failed (prices are kept):", repr(e))
 
 pd.DataFrame(rows).to_csv("data/latest.csv", index=False)
 print("wrote", len(rows), "rows at", now)
