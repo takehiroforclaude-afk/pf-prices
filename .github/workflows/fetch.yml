@@ -18,6 +18,8 @@ jobs:
           python-version: '3.12'
       - run: pip install --quiet yfinance pandas
       - run: mkdir -p data && python fetch_prices.py
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
       - name: commit
         run: |
           git config user.name "github-actions[bot]"
