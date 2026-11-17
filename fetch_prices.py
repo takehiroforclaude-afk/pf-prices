@@ -1,4 +1,5 @@
 # 市場の終値を Yahoo Finance から取り、data/prices.csv（日付×銘柄の終値）と data/latest.csv（直近の終値と前日比）を書く
+# v3.3（2026-11-17）：Yahoo が一時的に行を落としても消えないよう、前回の prices.csv の値と重ねる（新しい値が優先。前回の値は、今回の取得が空のところだけ使う）
 # v3.2（2026-11-16）：FRED の公開の画面からは GitHub で応答なし（6通りとも時間切れ）。FRED の API（登録キー）に切り替え。キー（GitHub の Secrets の FRED_API_KEY）が無いときは取りに行かず、すぐ飛ばす
 # v3.1（2026-11-16）：FRED の取り方を3通りに増やし、結果を data/credit_status.txt に書く（失敗の理由を外から見るため）
 # v3（2026-11-16）：信用の指標を追加。FRED の社債の上乗せ金利（ハイイールド・投資適格）を data/credit.csv に書き、latest.csv に足す。代わりの目安として HYG・LQD の価格も取る
@@ -50,6 +51,19 @@ if len(got) < len(syms) // 2:
 C = C[got].sort_index()
 C.index = pd.to_datetime(C.index).strftime("%Y-%m-%d")
 C.index.name = "date"
+try:                                # 前回の値で、今回の取得が空のところだけ埋める（同じ期間・同じ銘柄の中だけ）
+    old = pd.read_csv("data/prices.csv", index_col=0)
+    old.index = old.index.astype(str)
+    old = old.reindex(columns=got)
+    old = old[old.index >= C.index.min()]
+    filled = int((C.isna() & old.reindex(index=C.index).notna()).sum().sum())
+    C = C.combine_first(old)[got].sort_index()
+    C.index.name = "date"
+    print("filled from previous prices.csv:", filled)
+except FileNotFoundError:
+    pass
+except Exception as e:
+    print("merge with previous prices.csv skipped:", repr(e))
 C.round(4).to_csv("data/prices.csv")
 
 now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M")
